@@ -5,6 +5,7 @@
 import os
 import subprocess
 import tempfile
+import time
 
 import mozinfo
 from mozlog.formatters.process import strstatus
@@ -31,38 +32,90 @@ def dump_screen(utilityPath, log, prefix="mozilla-test-fail-screenshot_"):
 
     is_structured_log = hasattr(log, "process_exit")
 
-    # Need to figure out which OS-dependent tool to use
-    if mozinfo.isLinux:
-        utility = [os.path.join(utilityPath, "screentopng")]
-        utilityname = "screentopng"
-    elif mozinfo.isMac:
-        utility = ["/usr/sbin/screencapture", "-C", "-x", "-t", "png"]
-        utilityname = "screencapture"
-    elif mozinfo.isWin:
-        utility = [os.path.join(utilityPath, "screenshot.exe")]
-        utilityname = "screenshot"
-
     # Get dir where to write the screenshot file
     parent_dir = os.environ.get("MOZ_UPLOAD_DIR", None)
     if not parent_dir:
         log.info("Failed to retrieve MOZ_UPLOAD_DIR env var")
         return
 
-    # Run the capture
-    try:
-        tmpfd, imgfilename = tempfile.mkstemp(
-            prefix=prefix, suffix=".png", dir=parent_dir
-        )
-        os.close(tmpfd)
-        if is_structured_log:
-            log.process_start(utilityname)
-        returncode = subprocess.call(utility + [imgfilename])
-        if is_structured_log:
-            log.process_exit(utilityname, returncode)
-        else:
-            printstatus(utilityname, returncode)
-    except OSError as err:
-        log.info("Failed to start %s for screenshot: %s" % (utility[0], err.strerror))
+    # Need to figure out which OS-dependent tool to use
+    if mozinfo.isLinux:
+        utility = [os.path.join(utilityPath, "screentopng")]
+        utilityname = "screentopng"
+        # Run the capture
+        try:
+            tmpfd, imgfilename = tempfile.mkstemp(
+                prefix=prefix, suffix=".png", dir=parent_dir
+            )
+            os.close(tmpfd)
+            if is_structured_log:
+                log.process_start(utilityname)
+            returncode = subprocess.call(utility + [imgfilename])
+            if is_structured_log:
+                log.process_exit(utilityname, returncode)
+            else:
+                printstatus(utilityname, returncode)
+        except OSError as err:
+            log.info("Failed to start %s for screenshot: %s" % (utility[0], err.strerror))
+    elif mozinfo.isMac:
+        utilityname = "screencapture"
+        trigger_file = "/Users/cltbld/.trigger_screenshot"
+        launchagent_plist = "/Users/cltbld/Library/LaunchAgents/com.mozilla.screencapture.plist"
+
+        # Check if trigger-based system is available (ARM workers)
+        use_trigger = os.path.exists(launchagent_plist)
+
+        try:
+            tmpfd, imgfilename = tempfile.mkstemp(
+                prefix=prefix, suffix=".png", dir=parent_dir
+            )
+            os.close(tmpfd)
+            if is_structured_log:
+                log.process_start(utilityname)
+
+            if use_trigger:
+                # Use trigger-based screenshot capture via LaunchAgent (ARM workers)
+                # Write the desired output path to the trigger file
+                with open(trigger_file, "w") as f:
+                    f.write(imgfilename)
+                # Wait for the screenshot to be created (up to 5 seconds)
+                for _ in range(50):
+                    if os.path.exists(imgfilename) and os.path.getsize(imgfilename) > 0:
+                        returncode = 0
+                        break
+                    time.sleep(0.1)
+                else:
+                    log.info("Screenshot was not created within timeout")
+                    returncode = 1
+            else:
+                # Use direct screencapture command (Intel workers)
+                utility = ["/usr/sbin/screencapture", "-C", "-x", "-t", "png"]
+                returncode = subprocess.call(utility + [imgfilename])
+
+            if is_structured_log:
+                log.process_exit(utilityname, returncode)
+            else:
+                printstatus(utilityname, returncode)
+        except (OSError, IOError) as err:
+            log.info("Failed to capture screenshot: %s" % str(err))
+    elif mozinfo.isWin:
+        utility = [os.path.join(utilityPath, "screenshot.exe")]
+        utilityname = "screenshot"
+        # Run the capture
+        try:
+            tmpfd, imgfilename = tempfile.mkstemp(
+                prefix=prefix, suffix=".png", dir=parent_dir
+            )
+            os.close(tmpfd)
+            if is_structured_log:
+                log.process_start(utilityname)
+            returncode = subprocess.call(utility + [imgfilename])
+            if is_structured_log:
+                log.process_exit(utilityname, returncode)
+            else:
+                printstatus(utilityname, returncode)
+        except OSError as err:
+            log.info("Failed to start %s for screenshot: %s" % (utility[0], err.strerror))
 
 
 def dump_device_screen(device, log, prefix="mozilla-test-fail-screenshot_"):
