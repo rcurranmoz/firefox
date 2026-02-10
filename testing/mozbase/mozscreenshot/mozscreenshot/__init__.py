@@ -95,10 +95,7 @@ def dump_screen(utilityPath, log, prefix="mozilla-test-fail-screenshot_"):
             else:
                 printstatus(utilityname, returncode)
     except OSError as err:
-        log.info(
-            "Failed to start %s for screenshot: %s"
-            % (utilityname, err.strerror)
-        )
+        log.info("Failed to start %s for screenshot: %s" % (utilityname, err.strerror))
 
 
 def dump_device_screen(device, log, prefix="mozilla-test-fail-screenshot_"):
